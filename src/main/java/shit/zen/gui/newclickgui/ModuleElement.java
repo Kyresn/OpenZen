@@ -146,8 +146,10 @@ extends UIElement {
             return true;
         }
         if (CursorUtil.isInBounds((float) mouseX, (float) mouseY, this.posX, this.posY + 20.0f, 120.0f, this.totalHeight - 20.0f)) {
-            Iterator<SettingElement<?>> iterator = this.settingElements.iterator();
-            while (iterator.hasNext() && !iterator.next().mouseClicked(mouseX, mouseY, button)) {
+            for (SettingElement<?> settingElement : this.settingElements) {
+                if (settingElement.getSetting().getVisibility().displayable() && settingElement.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
             }
         }
         return this.isHovered;
@@ -155,12 +157,12 @@ extends UIElement {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (this.isHovered && CursorUtil.isInBounds((float) mouseX, (float) mouseY, this.posX, this.posY + 20.0f, 120.0f, this.totalHeight - 20.0f)) {
-            Iterator<SettingElement<?>> iterator = this.settingElements.iterator();
-            while (iterator.hasNext() && !iterator.next().mouseReleased(mouseX, mouseY, button)) {
+        for (SettingElement<?> settingElement : this.settingElements) {
+            if (settingElement.mouseReleased(mouseX, mouseY, button)) {
+                return true;
             }
         }
-        return this.isHovered;
+        return false;
     }
 
     @Override

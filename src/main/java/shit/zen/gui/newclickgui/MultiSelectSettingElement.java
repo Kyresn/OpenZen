@@ -124,6 +124,9 @@ extends SettingElement<MultiSelectSetting> {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (!this.setting.getVisibility().displayable()) {
+            return false;
+        }
         if (this.isDropdownHovered) {
             this.isOpen = !this.isOpen;
             return true;

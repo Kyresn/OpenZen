@@ -175,9 +175,8 @@ extends UIElement {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (CursorUtil.isInBounds((float)mouseX, (float)mouseY, this.posX, this.posY + 20.0f, 120.0f, this.panelHeight - 20.0f)) {
-            for (ModuleElement moduleElement : this.moduleElements) {
-                if (!moduleElement.mouseReleased(mouseX, mouseY, button)) continue;
+        for (ModuleElement moduleElement : this.moduleElements) {
+            if (moduleElement.mouseReleased(mouseX, mouseY, button)) {
                 return true;
             }
         }
