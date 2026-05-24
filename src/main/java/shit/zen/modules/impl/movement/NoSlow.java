@@ -57,7 +57,7 @@ public class NoSlow extends Module {
         IDLE, WAITING, SWAPPING, USING
     }
 
-    public final ModeSetting mode             = createModeSetting();
+    public final ModeSetting mode             = new ModeSetting("Mode", "Grim V3", "NoSlow").withDefault("Grim V3");
     public final BooleanSetting bowNoSlow      = new BooleanSetting("Bow", false, this::isGrimSlowMode);
     public final BooleanSetting keepSprinting  = new BooleanSetting("Keep Sprinting", true);
     public final BooleanSetting crossbowNoSlow = new BooleanSetting("Crossbow", false);
@@ -89,12 +89,10 @@ public class NoSlow extends Module {
     public NoSlow() {
         super("NoSlow", Category.MOVEMENT);
         INSTANCE = this;
-        this.checkAndFallbackMode();
     }
 
     @Override
     public void onEnable() {
-        this.checkAndFallbackMode();
         releaseItemSent = false;
         this.releaseTicksRemaining = 0;
         this.clearOffhandQueue();
@@ -144,7 +142,6 @@ public class NoSlow extends Module {
 
     @EventTarget
     public void onTick(TickEvent event) {
-        this.checkAndFallbackMode();
         if (mc.player == null) {
             this.clearOffhandQueue();
             this.stopBlink();
@@ -544,35 +541,12 @@ public class NoSlow extends Module {
         mc.options.keyUse.setDown(down);
     }
 
-    private static ModeSetting createModeSetting() {
-        // Original branched on Grim role; using a single mode setting now.
-        return new ModeSetting("Mode", "Grim V3", "NoSlow").withDefault("Grim V3");
-    }
-
-    static boolean hasGrimRole() {
-        return false;
-    }
-
-    static boolean isGrimMode(String string) {
-        return "Grim V3".equals(string);
-    }
-
-    private void checkAndFallbackMode() {
-        if (!hasGrimRole() && this.isGrimModeActive()) {
-            this.mode.setValue("NoSlow");
-        }
-    }
-
-    private boolean isGrimModeActive() {
-        return isGrimMode(this.mode.getValue());
-    }
-
     private boolean isGrimSlowMode() {
-        return hasGrimRole() && this.isGrimModeActive();
+        return this.mode.is("Grim V3");
     }
 
     private boolean isNoSlowMode() {
-        return "NoSlow".equals(this.mode.getValue());
+        return this.mode.is("NoSlow");
     }
 
     private Packet<?> createUseItemPacket(int sequence) {

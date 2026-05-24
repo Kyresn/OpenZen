@@ -16,11 +16,28 @@ jobs:
     timeout-minutes: 180
 
     env:
-      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
-      # Push to / pull from the GitHub Actions binary cache so a fresh
-      # checkout reuses already-built Qt instead of rebuilding from
-      # source on every push.
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      # NOTE: do not declare VCPKG_ROOT here. The windows-2022 runner
+      # ships VS Enterprise which pre-sets a system-wide VCPKG_ROOT
+      # pointing at its own (empty) vcpkg dir, and that pre-set value
+      # wins over a job-level env in PowerShell expansions. We export
+      # the right VCPKG_ROOT into $GITHUB_ENV inside the clone step
+      # so every later step sees our copy.
+      #
+      # We rely on actions/cache for the installed Qt artifacts; the
+      # vcpkg x-gha backend depends on the v1 GitHub Actions cache API
+      # which has been deprecated, and a fresh runner image often does
+      # not have ACTIONS_RESULTS_URL set for non-Node actions yet.
+      # Setting "files" as the binary source means vcpkg will still
+      # populate ${VCPKG_ROOT}/archives, which actions/cache then
+      # snapshots along with installed/.
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}\\vcpkg-archives,readwrite"
+      # Opt every JavaScript action into the Node.js 24 runtime ahead of the
+      # 2026-06-02 forced switchover. The v4 / v1 pins below all still ship
+      # a Node 20 binary in their action.yml, and GitHub deprecated Node 20
+      # on 2025-09-19; setting this flag makes the runner execute them under
+      # Node 24 regardless, which silences the deprecation warning and
+      # de-risks the upcoming default flip.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: Checkout
@@ -47,24 +64,35 @@ jobs:
         with:
           arch: x64
 
-      # Expose ACTIONS_CACHE_URL / ACTIONS_RUNTIME_TOKEN to subsequent
-      # steps so vcpkg's x-gha cache backend works. These are set by
-      # the runner but only exposed to actions via the toolkit; we
-      # forward them manually for the shell-based vcpkg calls below.
-      - name: Export GitHub Actions cache tokens
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
       - name: Clone & bootstrap vcpkg
         shell: pwsh
         run: |
-          git clone --depth=1 https://github.com/microsoft/vcpkg.git "$env:VCPKG_ROOT"
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
-          Write-Host "vcpkg at $env:VCPKG_ROOT"
-          & "$env:VCPKG_ROOT\vcpkg.exe" version
+          $vcpkg = Join-Path $env:GITHUB_WORKSPACE 'vcpkg'
+          if (Test-Path $vcpkg) {
+              Write-Host "Reusing existing $vcpkg"
+          } else {
+              git clone --depth=1 https://github.com/microsoft/vcpkg.git $vcpkg
+          }
+          & "$vcpkg\bootstrap-vcpkg.bat" -disableMetrics
+          & "$vcpkg\vcpkg.exe" version
+          "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Exported VCPKG_ROOT=$vcpkg to GITHUB_ENV"
+
+      # Cache the resolved Qt install + the file-backed binary archive.
+      # Key is keyed on vcpkg.json so any dependency change invalidates;
+      # restore-keys lets a vcpkg.json bump still warm-start from the
+      # previous build's archives. installed/ alone makes CMake's manifest
+      # mode skip rebuilding qtbase; archives/ also fills back transitive
+      # deps if a partial rebuild is needed.
+      - name: Cache vcpkg installed + archives
+        uses: actions/cache@v4
+        with:
+          path: |
+            vcpkg\installed
+            vcpkg-archives
+          key: vcpkg-qt-${{ runner.os }}-${{ hashFiles('native/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-qt-${{ runner.os }}-
 
       - name: Install UPX
         shell: pwsh
@@ -85,20 +113,53 @@ jobs:
         env:
           OPENZEN_BUILD_REVISION: ${{ steps.rev.outputs.sha }}
         run: |
+          Write-Host "VCPKG_ROOT       = $env:VCPKG_ROOT"
+          Write-Host "JAVA_HOME        = $env:JAVA_HOME"
+          Write-Host "OPENZEN_BUILD_REV = $env:OPENZEN_BUILD_REVISION"
           .\gradlew.bat --no-daemon clean dll upxCompress
 
-      - name: Show artifact info
+      # Rename the two distributable artifacts so their final filenames carry
+      # the build sha. We rename rather than re-publish at build time so the
+      # local `./gradlew dll` workflow keeps producing stable filenames.
+      - name: Stage release artifacts
         shell: pwsh
         run: |
-          $exe = "build\dist\OpenZenLoader.exe"
-          if (-not (Test-Path $exe)) { throw "missing $exe" }
-          $sz = (Get-Item $exe).Length
-          Write-Host ("OpenZenLoader.exe: {0:N0} bytes ({1:N2} MB)" -f $sz, ($sz/1MB))
+          $sha = "${{ steps.rev.outputs.sha }}"
+          $exeSrc = "build\dist\OpenZenLoader.exe"
+          $jarSrc = "build\libs\hey-1.0.jar"
+          if (-not (Test-Path $exeSrc)) { throw "missing $exeSrc" }
+          if (-not (Test-Path $jarSrc)) { throw "missing $jarSrc" }
 
-      - name: Upload OpenZenLoader.exe
+          $release = "build\release"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $exeDst = Join-Path $release "OpenZenLoader-$sha.exe"
+          $jarDst = Join-Path $release "OpenZen-$sha.jar"
+          Copy-Item -Force $exeSrc $exeDst
+          Copy-Item -Force $jarSrc $jarDst
+
+          $exeSz = (Get-Item $exeDst).Length
+          $jarSz = (Get-Item $jarDst).Length
+          Write-Host ("OpenZenLoader-{0}.exe : {1:N0} bytes ({2:N2} MB)" -f $sha, $exeSz, ($exeSz/1MB))
+          Write-Host ("OpenZen-{0}.jar       : {1:N0} bytes ({2:N2} MB)" -f $sha, $jarSz, ($jarSz/1MB))
+
+      # NOTE: actions/upload-artifact always wraps its content in a zip; that
+      # is a platform limitation we cannot disable. By giving each artifact a
+      # single file whose name already encodes the sha, the download is
+      # OpenZenLoader-<sha>.exe.zip / OpenZen-<sha>.jar.zip, each containing
+      # just the named file (no nested directory). For raw exe/jar downloads
+      # without the zip wrapper, attach to a GitHub Release instead.
+      - name: Upload OpenZenLoader exe
         uses: actions/upload-artifact@v4
         with:
-          name: OpenZenLoader-${{ steps.rev.outputs.sha }}
-          path: build/dist/OpenZenLoader.exe
+          name: OpenZenLoader-${{ steps.rev.outputs.sha }}.exe
+          path: build/release/OpenZenLoader-${{ steps.rev.outputs.sha }}.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload OpenZen jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenZen-${{ steps.rev.outputs.sha }}.jar
+          path: build/release/OpenZen-${{ steps.rev.outputs.sha }}.jar
           if-no-files-found: error
           retention-days: 30
