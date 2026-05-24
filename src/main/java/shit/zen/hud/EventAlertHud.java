@@ -69,7 +69,7 @@ implements IHudElement {
             Entity owner = ((ThrownEnderpearl)entity).getOwner();
             return owner != null && !owner.equals(mc.player);
         }).map(java.util.Map.Entry::getValue).min(Comparator.comparingDouble(p -> p.getVelocity().distanceToSqr(mc.player.position())));
-        return nearest.map(e -> new EventAlertHud.AlertEntry(e.getVelocity(), e.getZ(), Optional.of((float)e.getX()), "Find an ender pearl!", ""));
+        return nearest.map(e -> new EventAlertHud.AlertEntry(e.getVelocity(), e.getZ(), Optional.of((float)e.getX()), "Find an ender pearl!", "\uE55E"));
     }
 
     private Optional<EventAlertHud.AlertEntry> findEntityAlert() {
@@ -82,7 +82,7 @@ implements IHudElement {
         if (this.activeAlerts.isEmpty()) {
             return Optional.empty();
         }
-        return this.activeAlerts.keySet().stream().filter(v -> mc.player.position().distanceToSqr(v) < 65536.0).min(Comparator.comparingDouble(v -> mc.player.position().distanceToSqr(v))).map(v -> new EventAlertHud.AlertEntry(v, mc.player.position().distanceTo(v), Optional.empty(), "Found a lightning strike!", ""));
+        return this.activeAlerts.keySet().stream().filter(v -> mc.player.position().distanceToSqr(v) < 65536.0).min(Comparator.comparingDouble(v -> mc.player.position().distanceToSqr(v))).map(v -> new EventAlertHud.AlertEntry(v, mc.player.position().distanceTo(v), Optional.empty(), "Found a lightning strike!", "\uEA0B"));
     }
 
     private Optional<EventAlertHud.AlertEntry> findBestAlert() {
@@ -122,7 +122,7 @@ implements IHudElement {
             float padding = 12.0f;
             float iconX = x + padding;
             float centerY = y + height / 2.0f;
-            boolean hasPathIcon = "".equals(alert.icon());
+            boolean hasPathIcon = "".equals(alert.icon());
             if (hasPathIcon) {
                 if (this.lastAlertPos == null || !this.lastAlertPos.equals(alert.pos())) {
                     this.lastAlertPos = alert.pos();
@@ -180,13 +180,13 @@ implements IHudElement {
                 double dx = alertPos.x - eyePos.x;
                 double dz = alertPos.z - eyePos.z;
                 if (Math.sqrt(dx * dx + dz * dz) < 1.0) {
-                    String arrow = alertPos.y > eyePos.y ? "" : "";
+                    String arrow = alertPos.y > eyePos.y ? "\uE5D8" : "\uE5DB";
                     float arrowWidth = subtitleFont.getWidth(arrow);
                     float arrowX = x + width - padding - arrowWidth;
                     float arrowY = centerY - (subtitleFont.getMetrics().ascent() + subtitleFont.getMetrics().descent()) / 2.0f - subtitleFont.getMetrics().descent();
                     drawContext.drawString(arrow, arrowX, arrowY, subtitleFont, paint);
                 } else {
-                    float arrowWidth = subtitleFont.getWidth("");
+                    float arrowWidth = subtitleFont.getWidth("\uE5D8");
                     float arrowX = x + width - padding - arrowWidth;
                     float arrowY = centerY;
                     drawContext.save();
@@ -198,7 +198,7 @@ implements IHudElement {
                     float ascent = subtitleFont.getMetrics().ascent();
                     float descent = subtitleFont.getMetrics().descent();
                     float baseOffsetY = -(ascent + descent) / 2.0f;
-                    drawContext.drawString("", -arrowWidth / 2.0f, baseOffsetY, subtitleFont, paint);
+                    drawContext.drawString("\uE5D8", -arrowWidth / 2.0f, baseOffsetY, subtitleFont, paint);
                     drawContext.restore();
                 }
             }
@@ -213,7 +213,7 @@ implements IHudElement {
         Path path = null;
         float length = 0.0f;
         try {
-            short[] glyphCodes = titleFont.getGlyphCodes("");
+            short[] glyphCodes = titleFont.getGlyphCodes("\uEA0B");
             if (glyphCodes != null && glyphCodes.length > 0) {
                 path = titleFont.getGlyphPath(glyphCodes[0]);
                 if (path != null) {

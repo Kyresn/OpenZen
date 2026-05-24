@@ -405,7 +405,13 @@ tasks.register('buildNative', Exec) {
     doFirst {
         def cmake = findCmake()
         if (!cmake) throw new GradleException(cmakeMissingMessage)
-        commandLine cmake, '--build', 'build', '--config', 'Release'
+        // --parallel without a number lets CMake pick the host's logical CPU
+        // count and forwards it to the underlying generator (MSBuild gets /m,
+        // Ninja gets -j). MSBuild defaults to a single process otherwise.
+        def jobs = Runtime.runtime.availableProcessors()
+        logger.lifecycle("Parallel jobs: ${jobs}")
+        commandLine cmake, '--build', 'build', '--config', 'Release',
+                '--parallel', jobs.toString()
     }
 }
 

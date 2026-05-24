@@ -37,7 +37,12 @@ add_compile_definitions(
 )
 
 if(MSVC)
-    add_compile_options(/W3 /permissive- /utf-8 /EHsc)
+    # /MP enables cl.exe-level multi-process compilation: every translation
+    # unit inside a single vcxproj compiles in parallel. Without it, MSBuild
+    # only parallelises *across* projects (the -j N forwarded by
+    # `cmake --build --parallel` controls that), so a single project with
+    # a dozen .cpp files would still compile serially.
+    add_compile_options(/W3 /permissive- /utf-8 /EHsc /MP)
 endif()
 
 add_subdirectory(dll)
