@@ -75,7 +75,18 @@ public class ZenClient extends ClientBase {
     public ZenClient() {
         if (instance == null) {
             instance = this;
-            this.init();
+            if (isClientDist()) {
+                this.init();
+            }
+        }
+    }
+
+    private boolean isClientDist() {
+        try {
+            Class.forName("net.minecraft.client.Minecraft");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
         }
     }
 

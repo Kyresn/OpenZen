@@ -1,0 +1,13 @@
+Manifest-Version: 1.0
+Specification-Title: hey
+Specification-Vendor: Shirona1337
+Specification-Version: 1
+Implementation-Title: OpenZen
+Implementation-Version: 1.0
+Implementation-Vendor: Shirona1337
+Implementation-Timestamp: 2026-05-24T15:21:33+0800
+Premain-Class: asm.patchify.loader.PatchAgent
+Agent-Class: asm.patchify.loader.PatchAgent
+Can-Retransform-Classes: true
+Can-Redefine-Classes: true
+

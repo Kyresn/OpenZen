@@ -27,3 +27,7 @@ forge*changelog.txt
 # Native DLL build artifacts (CMake out-of-source build + staged jar)
 native/build/
 native/zen.jar
+
+#opencode
+.omo
+.vscode
