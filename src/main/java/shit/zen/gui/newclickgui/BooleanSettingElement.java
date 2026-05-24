@@ -78,7 +78,10 @@ extends SettingElement<BooleanSetting> {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (this.isHovered && CursorUtil.isInBounds((float)mouseX, (float)mouseY, this.x + 120.0f - 20.0f - 6.0f, this.y + (this.getHeight() - 10.0f) / 2.0f, 20.0f, 10.0f)) {
+        if (!this.setting.getVisibility().displayable()) {
+            return false;
+        }
+        if (this.isHovered && CursorUtil.isInBounds((float)mouseX, (float)mouseY, this.x, this.y, 120.0f, this.getHeight())) {
             this.setting.setValue(this.setting.getValue() == false);
             return true;
         }
