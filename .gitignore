@@ -28,6 +28,5 @@ forge*changelog.txt
 native/build/
 native/zen.jar
 
-#opencode
 .omo
-.vscode
+/.vscode
