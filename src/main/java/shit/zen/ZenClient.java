@@ -43,6 +43,7 @@ import shit.zen.patch.MinecraftPatch;
 import shit.zen.patch.PacketUtilsPatch;
 import shit.zen.patch.PlayerPatch;
 import shit.zen.patch.PlayerTabOverlayPatch;
+import shit.zen.patch.BlockStateBasePatch;
 import shit.zen.asm.Bootstrap;
 import shit.zen.utils.rotation.RotationHandler;
 
@@ -218,6 +219,7 @@ public class ZenClient extends ClientBase {
         PatchRegistry.register(ItemPatch.class);
         PatchRegistry.register(PlayerTabOverlayPatch.class);
         PatchRegistry.register(FriendlyByteBufPatch.class);
+        PatchRegistry.register(BlockStateBasePatch.class);
     }
 
     public static Minecraft getMcInstance() {
