@@ -30,4 +30,6 @@ native/zen.jar
 
 # opencode
 .omo/
+.omo
 .vscode/
+.vscode
