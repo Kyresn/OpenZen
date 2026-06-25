@@ -20,6 +20,7 @@ import net.minecraft.world.level.block.LadderBlock;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.TntBlock;
+import net.minecraft.world.level.block.WebBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.Shapes;
@@ -120,6 +121,10 @@ extends ClientBase {
                 return false;
             }
             if (block instanceof SlabBlock) {
+                return false;
+            }
+            // Cobwebs are tactical utility items (AutoWebPlace ammo), never bridging blocks.
+            if (block instanceof WebBlock) {
                 return false;
             }
             return !blacklist.contains(block);

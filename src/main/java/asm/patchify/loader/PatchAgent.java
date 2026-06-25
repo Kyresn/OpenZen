@@ -18,8 +18,8 @@ import org.apache.logging.log4j.Logger;
  * regardless of which class loader it lives in.</p>
  */
 public final class PatchAgent {
-    public static final String INSTRUMENTATION_KEY = "asm.patchify.instrumentation";
-    private static final Logger LOGGER = LogManager.getLogger("PatchAgent");
+    public static final String INSTRUMENTATION_KEY = "oz.instrumentation";
+    private static final Logger LOGGER = LogManager.getLogger(PatchAgent.class);
 
     private static volatile boolean transformerInstalled = false;
 
@@ -40,7 +40,7 @@ public final class PatchAgent {
             return;
         }
         System.getProperties().put(INSTRUMENTATION_KEY, inst);
-        LOGGER.info("PatchAgent attached, retransform supported = {}", inst.isRetransformClassesSupported());
+        LOGGER.info("agent attached, retransform supported = {}", inst.isRetransformClassesSupported());
     }
 
     /**
@@ -62,7 +62,7 @@ public final class PatchAgent {
         }
         Instrumentation inst = getInstrumentation();
         if (inst == null) {
-            LOGGER.warn("PatchAgent not attached; cannot install patches");
+            LOGGER.warn("agent not attached; cannot install patches");
             return;
         }
         PatchClassFileTransformer transformer = new PatchClassFileTransformer();
@@ -72,6 +72,29 @@ public final class PatchAgent {
         for (Class<?> patch : PatchRegistry.getPatches()) {
             asm.patchify.annotation.Patch ann = patch.getAnnotation(asm.patchify.annotation.Patch.class);
             if (ann == null) continue;
+            if (!ann.className().isEmpty()) {
+                // className-based patches target optional mod classes.
+                // Check if the class is already loaded via Instrumentation.
+                boolean found = false;
+                for (Class<?> loaded : inst.getAllLoadedClasses()) {
+                    if (loaded.getName().equals(ann.className())) {
+                        LOGGER.debug("Found already-loaded target {} for className-based patch {}",
+                                ann.className(), patch.getName());
+                        if (inst.isModifiableClass(loaded)) {
+                            retransform.add(loaded);
+                        } else {
+                            LOGGER.warn("Cannot retransform unmodifiable target {}", ann.className());
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    LOGGER.debug("Target {} not yet loaded — transformer will catch it at class-load time",
+                            ann.className());
+                }
+                continue;
+            }
             Class<?> target;
             try {
                 target = ann.value();

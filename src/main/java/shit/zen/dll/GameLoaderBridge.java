@@ -46,19 +46,19 @@ import org.apache.logging.log4j.Logger;
  * </ol>
  */
 public final class GameLoaderBridge {
-    private static final Logger LOGGER = LogManager.getLogger("GameLoaderBridge");
+    private static final Logger LOGGER = LogManager.getLogger(GameLoaderBridge.class);
     public static final String RESOURCES_PROP = "openzen.resources";
 
     private GameLoaderBridge() {
     }
 
     public static void load(String jarPath, ClassLoader gameLoader) throws Throwable {
-        LOGGER.info("GameLoaderBridge.load jar={} gameLoader={}", jarPath, gameLoader);
+        LOGGER.info("bridge.load jar={} gameLoader={}", jarPath, gameLoader);
         long t0 = System.nanoTime();
 
         Instrumentation inst = PatchAgent.getInstrumentation();
         if (inst == null) {
-            throw new IllegalStateException("PatchAgent.getInstrumentation() returned null - "
+            throw new IllegalStateException("agent instrumentation returned null - "
                     + "did instrument.dll Agent_OnAttach run?");
         }
 
@@ -128,7 +128,7 @@ public final class GameLoaderBridge {
                 classCount, resourceCount, resourceDir, ms);
 
         Class<?> bootstrapCls = Class.forName("shit.zen.dll.DllBootstrap", true, gameLoader);
-        LOGGER.info("DllBootstrap loader (should be gameLoader): {}", bootstrapCls.getClassLoader());
+        LOGGER.info("bootstrap loader (should be gameLoader): {}", bootstrapCls.getClassLoader());
         Method start = bootstrapCls.getMethod("start", String.class);
         start.invoke(null, jarPath);
     }

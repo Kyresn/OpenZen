@@ -29,6 +29,12 @@ public class StencilHelper {
     private static final RenderTarget mainRenderTarget = ClientBase.mc.getMainRenderTarget();
 
     public static void applyStencil(PoseStack poseStack, Runnable drawMask, Runnable drawContent, float opacity) {
+        if (!stencilShader.isValid()) {
+            // Stencil shader unavailable on this driver — skip the rounded composite and
+            // just draw the content directly so the panel still shows (without rounding).
+            drawContent.run();
+            return;
+        }
         Matrix4f pose = poseStack.last().pose();
         RenderTarget mask = maskTarget.get();
         if (mask.width != StencilHelper.mainRenderTarget.width || mask.height != StencilHelper.mainRenderTarget.height) {

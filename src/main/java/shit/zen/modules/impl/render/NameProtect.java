@@ -20,14 +20,8 @@ extends Module {
     private String cachedRandomName = null;
     private final Random random = new Random();
 
-    @Override
-    protected void onDisable() {
-        this.setEnabled(true);
-    }
-
     public NameProtect() {
         super("NameProtect", Category.RENDER);
-        this.setEnabled(true);
         INSTANCE = this;
     }
 

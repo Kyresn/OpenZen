@@ -17,7 +17,7 @@ import org.apache.logging.log4j.Logger;
  * lightweight no-op fallback when no transformer is installed.</p>
  */
 public final class PatchRegistry {
-    private static final Logger LOGGER = LogManager.getLogger("PatchRegistry");
+    private static final Logger LOGGER = LogManager.getLogger(PatchRegistry.class);
     private static final List<Class<?>> PATCHES = new ArrayList<>();
 
     private PatchRegistry() {

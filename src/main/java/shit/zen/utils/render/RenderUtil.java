@@ -141,6 +141,11 @@ extends ClientBase {
         if (roundedRectShader == null) {
             roundedRectShader = new ShaderProgram("rounded_rect", "vertex_color", ShaderFormats.POSITION_UV_COLOR);
         }
+        if (!roundedRectShader.isValid()) {
+            // Rounded-rect shader unavailable on this driver — draw a plain rect instead of crashing.
+            RenderUtil.drawFilledRect(poseStack, x, y, width, height, color);
+            return;
+        }
         Matrix4f matrix4f = poseStack.last().pose();
         roundedRectShader.use();
         GL20.glUniform2f(roundedRectShader.getUniformLocation("Size"), width, height);
@@ -221,6 +226,11 @@ extends ClientBase {
             }
             if (blurShader == null) {
                 blurShader = new ShaderProgram("blur", ShaderFormats.POSITION_UV_COLOR);
+            }
+            if (!blurShader.isValid()) {
+                // Blur shader unavailable on this driver — disable blur for the rest of the session.
+                blurFailed = true;
+                return;
             }
             if (mainRenderTarget == null) {
                 mainRenderTarget = mc.getMainRenderTarget();

@@ -22,7 +22,7 @@ import shit.zen.asm.Bootstrap;
  * onwards.</p>
  */
 public final class DllBootstrap {
-    private static final Logger LOGGER = LogManager.getLogger("DllBootstrap");
+    private static final Logger LOGGER = LogManager.getLogger(DllBootstrap.class);
     private static volatile boolean started = false;
 
     private DllBootstrap() {
@@ -30,16 +30,16 @@ public final class DllBootstrap {
 
     public static synchronized void start(String extractedJarPath) {
         if (started) {
-            LOGGER.info("DllBootstrap.start ignored (already started)");
+            LOGGER.info("bootstrap.start ignored (already started)");
             return;
         }
         started = true;
         try {
-            LOGGER.info("DllBootstrap.start jar={}", extractedJarPath);
-            LOGGER.info("DllBootstrap loader  = {}", DllBootstrap.class.getClassLoader());
-            LOGGER.info("ZenClient loader     = {}", ZenClient.class.getClassLoader());
+            LOGGER.info("bootstrap.start jar={}", extractedJarPath);
+            LOGGER.info("bootstrap loader  = {}", DllBootstrap.class.getClassLoader());
+            LOGGER.info("client loader     = {}", ZenClient.class.getClassLoader());
             LOGGER.info("Minecraft loader     = {}", Minecraft.class.getClassLoader());
-            LOGGER.info("PatchAgent inst      = {}", PatchAgent.getInstrumentation());
+            LOGGER.info("agent inst      = {}", PatchAgent.getInstrumentation());
 
             // Load mojmap → SRG mappings before we attempt any retransform.
             Bootstrap.init();
@@ -53,9 +53,9 @@ public final class DllBootstrap {
             ZenClient.registerPatches();
             PatchAgent.installPatchesAndRetransform();
 
-            LOGGER.info("DllBootstrap done. ZenClient will be constructed on the next Minecraft.tick.");
+            LOGGER.info("bootstrap done. client will be constructed on the next tick.");
         } catch (Throwable t) {
-            LOGGER.error("DllBootstrap.start failed", t);
+            LOGGER.error("bootstrap.start failed", t);
         }
     }
 }

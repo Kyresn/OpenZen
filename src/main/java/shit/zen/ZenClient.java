@@ -12,6 +12,8 @@ import lombok.Getter;
 import lombok.Setter;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.fml.common.Mod;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import shit.zen.event.EventBus;
 import shit.zen.event.EventTarget;
 import shit.zen.event.impl.TickEvent;
@@ -22,6 +24,8 @@ import shit.zen.manager.HudManager;
 import shit.zen.manager.LagManager;
 import shit.zen.manager.ModuleManager;
 import shit.zen.manager.TargetManager;
+import shit.zen.patch.BlockOcclusionCachePatch;
+import shit.zen.patch.BlockPatch;
 import shit.zen.patch.ChatScreenPatch;
 import shit.zen.patch.ClientLevelPatch;
 import shit.zen.patch.ConnectionPatch;
@@ -120,7 +124,7 @@ public class ZenClient extends ClientBase {
             if (PatchAgent.getInstrumentation() != null) {
                 PatchAgent.installPatchesAndRetransform();
             } else {
-                logger.warn("PatchAgent not attached. Launch with `./gradlew runClient0` so the agent jvmArg is set.");
+                logger.warn("agent not attached. Launch with `./gradlew runClient0` so the agent jvmArg is set.");
             }
             isReady = true;
             logger.info("{} v{} initialized.", CLIENT_NAME, VERSION);
@@ -211,6 +215,7 @@ public class ZenClient extends ClientBase {
         PatchRegistry.register(ChatScreenPatch.class);
         PatchRegistry.register(EntityRendererPatch.class);
         PatchRegistry.register(LevelRendererPatch.class);
+        PatchRegistry.register(BlockPatch.class);
         PatchRegistry.register(GameRendererPatch.class);
         PatchRegistry.register(ItemInHandRendererPatch.class);
         PatchRegistry.register(ItemInHandLayerPatch.class);
@@ -219,7 +224,6 @@ public class ZenClient extends ClientBase {
         PatchRegistry.register(ItemPatch.class);
         PatchRegistry.register(PlayerTabOverlayPatch.class);
         PatchRegistry.register(FriendlyByteBufPatch.class);
-        PatchRegistry.register(BlockStateBasePatch.class);
     }
 
     public static Minecraft getMcInstance() {

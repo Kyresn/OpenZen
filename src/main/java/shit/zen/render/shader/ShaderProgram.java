@@ -19,6 +19,8 @@ public class ShaderProgram {
     @Getter
     private final int programId;
     @Getter
+    private final boolean valid;
+    @Getter
     private final Map<String, Integer> uniformCache = new HashMap<>();
     @Getter
     private final Matrix4Uniform modelViewUniform;
@@ -50,6 +52,18 @@ public class ShaderProgram {
         this.programId = GL20.glCreateProgram();
         int fragmentShader = ShaderProgram.compileShader(ShaderSource.getByFileName(fragmentName + ".fsh").getSource(), 35632);
         int vertexShader = ShaderProgram.compileShader(ShaderSource.getByFileName(vertexName + ".vsh").getSource(), 35633);
+        // Shader compilation can fail on some drivers (notably Intel forward-compatible
+        // GL contexts, which reject legacy GLSL such as texture2D). Degrade gracefully —
+        // disable this program so callers skip the effect — instead of crashing the game.
+        if (fragmentShader == 0 || vertexShader == 0) {
+            if (fragmentShader != 0) GL20.glDeleteShader(fragmentShader);
+            if (vertexShader != 0) GL20.glDeleteShader(vertexShader);
+            LOGGER.error("Shader '{}' disabled: compilation failed; the effect will be skipped.", fragmentName);
+            this.modelViewUniform = null;
+            this.projectionUniform = null;
+            this.valid = false;
+            return;
+        }
         GL20.glAttachShader(this.programId, fragmentShader);
         GL20.glAttachShader(this.programId, vertexShader);
         for (Map.Entry<Integer, String> entry : attributesSupplier.get().entrySet()) {
@@ -59,15 +73,25 @@ public class ShaderProgram {
         GL20.glLinkProgram(this.programId);
         if (GL20.glGetProgrami(this.programId, 35714) == 0) {
             LOGGER.error(GL20.glGetProgramInfoLog(this.programId, Short.MAX_VALUE));
-            throw new IllegalStateException("Failed to link shader program!");
+            LOGGER.error("Shader '{}' disabled: program link failed; the effect will be skipped.", fragmentName);
+            GL20.glDeleteShader(fragmentShader);
+            GL20.glDeleteShader(vertexShader);
+            this.modelViewUniform = null;
+            this.projectionUniform = null;
+            this.valid = false;
+            return;
         }
         GL20.glDeleteShader(fragmentShader);
         GL20.glDeleteShader(vertexShader);
         this.modelViewUniform = new Matrix4Uniform(modelViewName).bindToProgram(this.programId);
         this.projectionUniform = new Matrix4Uniform(projName).bindToProgram(this.programId);
+        this.valid = true;
     }
 
     public void use() {
+        if (!this.valid) {
+            return;
+        }
         prevProgram = GL20.glGetInteger(35725);
         GL20.glUseProgram(this.programId);
         this.setModelView(RenderSystem.getModelViewMatrix());
@@ -112,8 +136,9 @@ public class ShaderProgram {
         GL20.glShaderSource(shader, source);
         GL20.glCompileShader(shader);
         if (GL20.glGetShaderi(shader, 35713) == 0) {
-            LOGGER.error(GL20.glGetShaderInfoLog(shader, Short.MAX_VALUE));
-            throw new IllegalStateException(String.format("Failed to compile shader! (Type: %s)", new Object[]{type}));
+            LOGGER.error("Failed to compile shader (type {}):\n{}", type, GL20.glGetShaderInfoLog(shader, Short.MAX_VALUE));
+            GL20.glDeleteShader(shader);
+            return 0;
         }
         return shader;
     }

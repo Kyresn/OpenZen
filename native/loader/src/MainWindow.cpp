@@ -15,6 +15,7 @@
 #include <QPainterPath>
 #include <QParallelAnimationGroup>
 #include <QPropertyAnimation>
+#include <QRandomGenerator>
 #include <QString>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -32,6 +33,28 @@ namespace loader {
 
 namespace {
 constexpr int kCornerRadius = 12;
+constexpr int kBaseWidth    = 760;
+constexpr int kBaseHeight   = 500;
+constexpr int kSizeJitter   = 10;   // ± px of random size jitter applied per launch
+
+// Random alphanumeric identifier (first char always a letter). Used to give the
+// loader window a non-constant Win32 title each launch so a scanner can't match
+// it against a fixed window-text string.
+QString randomIdent(int minLen, int maxLen) {
+    static const char kAlphabet[] =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    constexpr int kLetters = 52;                       // leading a-zA-Z only
+    constexpr int kAll     = int(sizeof(kAlphabet)) - 1;
+    QRandomGenerator* rng = QRandomGenerator::global();
+    const int len = minLen + int(rng->bounded(quint32(maxLen - minLen + 1)));
+    QString s;
+    s.reserve(len);
+    s.append(QLatin1Char(kAlphabet[rng->bounded(kLetters)]));
+    for (int i = 1; i < len; ++i) {
+        s.append(QLatin1Char(kAlphabet[rng->bounded(kAll)]));
+    }
+    return s;
+}
 
 QString fromW(const std::wstring& w) {
     return QString::fromWCharArray(w.c_str(), static_cast<int>(w.size()));
@@ -60,8 +83,14 @@ MainWindow::MainWindow(QWidget* parent)
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground);
-    setMinimumSize(760, 500);
-    resize(760, 500);
+    // Base size with a small random jitter (±kSizeJitter px) on each axis so the
+    // window dimensions aren't a constant fingerprint. Minimum is lowered by the
+    // jitter so a negative jitter isn't clamped back to the base size.
+    setMinimumSize(kBaseWidth - kSizeJitter, kBaseHeight - kSizeJitter);
+    QRandomGenerator* rng = QRandomGenerator::global();
+    const int jitterW = int(rng->bounded(quint32(2 * kSizeJitter + 1))) - kSizeJitter;
+    const int jitterH = int(rng->bounded(quint32(2 * kSizeJitter + 1))) - kSizeJitter;
+    resize(kBaseWidth + jitterW, kBaseHeight + jitterH);
 
     styleApp();
     buildUi();
@@ -75,12 +104,15 @@ MainWindow::MainWindow(QWidget* parent)
 
 void MainWindow::buildUi() {
 #ifdef OPENZEN_BUILD_REVISION
-    const QString winTitle = QStringLiteral("OpenZen Loader  ·  build %1")
+    const QString displayTitle = QStringLiteral("OpenZen Loader  ·  build %1")
             .arg(QString::fromLatin1(OPENZEN_BUILD_REVISION).left(7));
 #else
-    const QString winTitle = QStringLiteral("OpenZen Loader");
+    const QString displayTitle = QStringLiteral("OpenZen Loader");
 #endif
-    setWindowTitle(winTitle);
+    // The OS-level window title (what GetWindowTextW and window scanners read) is
+    // randomised on every launch so it can't be matched against a fixed string.
+    // The visible custom title bar below still shows the branded name.
+    setWindowTitle(randomIdent(8, 16));
 
     auto* central = new QWidget(this);
     central->setAttribute(Qt::WA_TranslucentBackground);
@@ -90,7 +122,7 @@ void MainWindow::buildUi() {
     root->setSpacing(0);
 
     titleBar_ = new TitleBar(central);
-    titleBar_->setTitleText(winTitle);
+    titleBar_->setTitleText(displayTitle);
     root->addWidget(titleBar_);
 
     auto* body = new QWidget(central);

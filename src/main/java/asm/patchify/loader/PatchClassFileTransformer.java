@@ -23,13 +23,13 @@ import org.objectweb.asm.tree.ClassNode;
  * <p>Indexes the patches by the JVM-internal name of their target class and rewrites class
  * bytes via ASM. Classes that have no patch are returned untouched (null).</p>
  *
- * <p>If the system property {@code asm.patchify.dumpDir} is set, every successfully
+ * <p>If the system property {@code oz.dumpDir} is set, every successfully
  * transformed class is written under that directory as {@code <internalName>.class} for
  * inspection (use {@code javap -v} or open in Recaf).</p>
  */
 public final class PatchClassFileTransformer implements ClassFileTransformer {
-    private static final Logger LOGGER = LogManager.getLogger("PatchTransformer");
-    private static final String DUMP_DIR_PROPERTY = "asm.patchify.dumpDir";
+    private static final Logger LOGGER = LogManager.getLogger(PatchClassFileTransformer.class);
+    private static final String DUMP_DIR_PROPERTY = "oz.dumpDir";
 
     private final Map<String, List<Class<?>>> patchesByTarget = new HashMap<>();
 
@@ -42,7 +42,12 @@ public final class PatchClassFileTransformer implements ClassFileTransformer {
         for (Class<?> patchClass : PatchRegistry.getPatches()) {
             Patch patch = patchClass.getAnnotation(Patch.class);
             if (patch == null) continue;
-            String internalName = patch.value().getName().replace('.', '/');
+            String internalName;
+            if (!patch.className().isEmpty()) {
+                internalName = patch.className().replace('.', '/');
+            } else {
+                internalName = patch.value().getName().replace('.', '/');
+            }
             patchesByTarget.computeIfAbsent(internalName, k -> new ArrayList<>()).add(patchClass);
         }
     }

@@ -33,3 +33,5 @@ native/zen.jar
 .omo
 .vscode/
 .vscode
+# Generated at build time by ext.obfuscateJar (holds the obfuscated bridge FQCN)
+native/dll/src/generated_names.h

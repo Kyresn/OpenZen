@@ -72,20 +72,41 @@ public final class PatchTransformer {
         if (patchAnnotation == null) {
             throw new IllegalArgumentException(patchClass.getName() + " is not @Patch");
         }
-        String patchTargetOwner = Type.getInternalName(patchAnnotation.value());
+        String patchTargetOwner;
+        if (!patchAnnotation.className().isEmpty()) {
+            patchTargetOwner = patchAnnotation.className().replace('.', '/');
+        } else {
+            patchTargetOwner = Type.getInternalName(patchAnnotation.value());
+        }
 
         Map<MethodKey, List<Method>> handlersByTarget = new HashMap<>();
+        // Collect handlers whose desc is empty (name-only wildcards) separately
+        List<Method> nameOnlyHandlers = new ArrayList<>();
         for (Method handler : patchClass.getDeclaredMethods()) {
-            collectHandler(patchClass, patchTargetOwner, handler, handlersByTarget);
+            collectHandler(patchClass, patchTargetOwner, handler, handlersByTarget, nameOnlyHandlers);
         }
         LOGGER.info("Loading patch {} -> {} ({} handler(s))",
                 patchClass.getName(), target.name,
-                handlersByTarget.values().stream().mapToInt(List::size).sum());
+                handlersByTarget.values().stream().mapToInt(List::size).sum() + nameOnlyHandlers.size());
 
         Set<MethodKey> matched = new HashSet<>();
+        Set<String> nameOnlyMatched = new HashSet<>();
         for (MethodNode method : target.methods) {
             MethodKey key = new MethodKey(method.name, method.desc);
             List<Method> handlers = handlersByTarget.get(key);
+            if (handlers == null && !nameOnlyHandlers.isEmpty()) {
+                // Try name-only match for handlers registered with empty desc.
+                // Works for every handler kind (Inject/Overwrite/Transform/WrapInvoke/
+                // ModifyLocals), not just Inject/Overwrite.
+                for (Method candidate : nameOnlyHandlers) {
+                    String targetName = getHandlerTargetMethodName(candidate);
+                    if (targetName.equals(method.name)) {
+                        if (handlers == null) handlers = new ArrayList<>();
+                        handlers.add(candidate);
+                        nameOnlyMatched.add(method.name);
+                    }
+                }
+            }
             if (handlers == null) continue;
             matched.add(key);
             for (Method handler : handlers) {
@@ -121,11 +142,34 @@ public final class PatchTransformer {
                         target.name, entry.getKey().name(), entry.getKey().desc(), target.name);
             }
         }
+        // Warn about unmatched name-only handlers
+        for (Method handler : nameOnlyHandlers) {
+            if (!nameOnlyMatched.contains(getHandlerTargetMethodName(handler))) {
+                LOGGER.warn("Patch handler {}#{} is name-only (empty desc) but no method named \"{}\" exists on {} — handler will not run.",
+                        handler.getDeclaringClass().getName(), handler.getName(),
+                        getHandlerTargetMethodName(handler), target.name);
+            }
+        }
+    }
+
+    private static String getHandlerTargetMethodName(Method handler) {
+        Inject inject = handler.getAnnotation(Inject.class);
+        if (inject != null) return inject.method();
+        Overwrite overwrite = handler.getAnnotation(Overwrite.class);
+        if (overwrite != null) return overwrite.method();
+        Transform transform = handler.getAnnotation(Transform.class);
+        if (transform != null) return transform.method();
+        WrapInvoke wrap = handler.getAnnotation(WrapInvoke.class);
+        if (wrap != null) return wrap.method();
+        ModifyLocals modify = handler.getAnnotation(ModifyLocals.class);
+        if (modify != null) return modify.method();
+        return "?";
     }
 
     private static void collectHandler(Class<?> patchClass, String patchTargetOwner,
                                        Method handler,
-                                       Map<MethodKey, List<Method>> handlersByTarget) {
+                                       Map<MethodKey, List<Method>> handlersByTarget,
+                                       List<Method> nameOnlyHandlers) {
         if (!(handler.isAnnotationPresent(Inject.class)
                 || handler.isAnnotationPresent(Overwrite.class)
                 || handler.isAnnotationPresent(Transform.class)
@@ -176,7 +220,13 @@ public final class PatchTransformer {
         // production Forge environment the live class only has SRG names, so
         // remap before matching against ClassNode.methods.
         name = Bootstrap.remapMethod(patchTargetOwner, name, desc);
-        handlersByTarget.computeIfAbsent(new MethodKey(name, desc), k -> new ArrayList<>()).add(handler);
+        if (desc.isEmpty()) {
+            // Empty desc = match by method name only (wildcard for mod classes
+            // whose exact descriptor may vary between Yarn and Mojmap mappings).
+            nameOnlyHandlers.add(handler);
+        } else {
+            handlersByTarget.computeIfAbsent(new MethodKey(name, desc), k -> new ArrayList<>()).add(handler);
+        }
     }
 
     private static void validateInjectSignature(Class<?> patchClass, Method handler, Inject inject) {
@@ -216,7 +266,58 @@ public final class PatchTransformer {
         }
     }
 
+    /**
+     * Validates that a HEAD-inject handler's parameter list is bytecode-compatible with the
+     * {@code (receiver?, args..., CallbackInfo)} sequence that {@link #injectHead} forwards.
+     *
+     * <p>This matters most for name-only ({@code desc=""}) patches: those match a target by
+     * method name alone, so a handler can end up bound to a method whose arity or primitive
+     * parameter types differ from what it declares. Forwarding into such a handler would emit a
+     * call site that fails JVM verification ({@code VerifyError}) at class load. Returns
+     * {@code null} when compatible, otherwise a human-readable reason.</p>
+     */
+    private static String headHandlerMismatch(MethodNode method, Method handler) {
+        List<Type> forwarded = new ArrayList<>();
+        if (!Modifier.isStatic(method.access)) {
+            // Receiver is always a reference; only its primitive-ness is checked below.
+            forwarded.add(Type.getObjectType("java/lang/Object"));
+        }
+        forwarded.addAll(Arrays.asList(Type.getArgumentTypes(method.desc)));
+
+        // The last handler parameter is CallbackInfo (enforced by validateInjectSignature);
+        // the remaining params receive the forwarded receiver + args.
+        int expected = handler.getParameterCount() - 1;
+        if (forwarded.size() != expected) {
+            return "handler takes " + expected + " forwarded parameter(s) but target supplies "
+                    + forwarded.size() + " (receiver + args)";
+        }
+        Class<?>[] params = handler.getParameterTypes();
+        for (int i = 0; i < forwarded.size(); i++) {
+            Type arg = forwarded.get(i);
+            Class<?> p = params[i];
+            boolean argIsPrimitive = arg.getSort() != Type.OBJECT && arg.getSort() != Type.ARRAY;
+            if (argIsPrimitive) {
+                // Primitives cannot widen to Object — the handler param must be the exact type.
+                if (!p.isPrimitive() || !p.getName().equals(arg.getClassName())) {
+                    return "parameter " + i + " is primitive " + arg.getClassName()
+                            + " but handler declares " + p.getName();
+                }
+            } else if (p.isPrimitive()) {
+                // A reference arg cannot be passed into a primitive parameter.
+                return "parameter " + i + " is a reference but handler declares primitive " + p.getName();
+            }
+        }
+        return null;
+    }
+
     private static void injectHead(MethodNode method, Method handler) {
+        String mismatch = headHandlerMismatch(method, handler);
+        if (mismatch != null) {
+            LOGGER.warn("@Inject(HEAD) {}#{} is incompatible with matched target {}{} — {} — skipping injection to avoid invalid bytecode.",
+                    handler.getDeclaringClass().getName(), handler.getName(),
+                    method.name, method.desc, mismatch);
+            return;
+        }
         Type returnType = Type.getReturnType(method.desc);
         String handlerOwner = Type.getInternalName(handler.getDeclaringClass());
         String handlerName = handler.getName();
@@ -700,7 +801,9 @@ public final class PatchTransformer {
 
     private static String targetClassName(Method handler) {
         Patch patch = handler.getDeclaringClass().getAnnotation(Patch.class);
-        return patch == null ? "?" : Type.getInternalName(patch.value());
+        if (patch == null) return "?";
+        if (!patch.className().isEmpty()) return patch.className().replace('.', '/');
+        return Type.getInternalName(patch.value());
     }
 
     private static List<AbstractInsnNode> collectInjectionPoints(InsnList insns, Slice slice,

@@ -88,31 +88,52 @@ jobs:
       - name: Clone & bootstrap vcpkg
         shell: pwsh
         run: |
+          # Pin vcpkg to the SAME commit as native/vcpkg.json's
+          # "builtin-baseline". A floating HEAD clone made the qtbase port
+          # (and thus its package ABI) drift every time upstream vcpkg moved,
+          # so the restored Qt cache never matched and qtbase was rebuilt
+          # from source (~31 min) on every run. Tag 2026.04.27 ==
+          # 56bb2411609227288b70117ead2c47585ba07713 and ships qtbase 6.10.2.
+          # We pin 6.10.2 (not the newer 6.11.0 from 2026.05.25) because MSVC
+          # 14.44.x crashes with an internal compiler error (C1001) building
+          # Qt 6.11.0 from source; 6.10.2 builds cleanly on every toolset we use.
+          # Keep this tag and the builtin-baseline in vcpkg.json in lockstep.
+          $vcpkgTag = '2026.04.27'
           $vcpkg = Join-Path $env:GITHUB_WORKSPACE 'vcpkg'
           if (Test-Path $vcpkg) {
               Write-Host "Reusing existing $vcpkg"
           } else {
-              git clone --depth=1 https://github.com/microsoft/vcpkg.git $vcpkg
+              git clone --depth=1 --branch $vcpkgTag https://github.com/microsoft/vcpkg.git $vcpkg
           }
           & "$vcpkg\bootstrap-vcpkg.bat" -disableMetrics
           & "$vcpkg\vcpkg.exe" version
           "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Exported VCPKG_ROOT=$vcpkg to GITHUB_ENV"
 
-      # Cache the resolved Qt install + the file-backed binary archive.
-      # Key is keyed on vcpkg.json so any dependency change invalidates;
-      # restore-keys lets a vcpkg.json bump still warm-start from the
-      # previous build's archives. installed/ alone makes CMake's manifest
-      # mode skip rebuilding qtbase; archives/ also fills back transitive
-      # deps if a partial rebuild is needed.
-      - name: Cache vcpkg installed + archives
+      # Cache the vcpkg *binary archives* — the only thing that lets vcpkg skip
+      # rebuilding qtbase. The build runs `gradlew clean`, which deletes
+      # native/build/ (and thus the manifest install dir native/build/vcpkg_installed),
+      # so on every run vcpkg re-resolves the manifest and restores packages from
+      # this file-backed binary cache. If it's empty, qtbase is compiled from
+      # source (~32 min). (We previously cached vcpkg\installed too, but in
+      # manifest mode that tree is never consulted for the rebuild decision — only
+      # the binary archive is — so it was ~1.2 GB of dead weight.)
+      #
+      # The key MUST rotate per run: actions/cache never overwrites an existing
+      # key, so a static key froze whatever archives the first run captured (none)
+      # and every later run hit "cache hit, not saving" at Post — discarding the
+      # qtbase archive it had just rebuilt, guaranteeing a fresh 32-min rebuild
+      # forever. Appending run_id makes Post always save a new entry; the layered
+      # restore-keys warm-start from the newest prior archive so qtbase is
+      # restored, not rebuilt. (GitHub LRU-evicts old entries within the 10 GB
+      # budget; the archive is only a few hundred MB.)
+      - name: Cache vcpkg binary archives
         uses: actions/cache@v4
         with:
-          path: |
-            vcpkg\installed
-            vcpkg-archives
-          key: vcpkg-qt-${{ runner.os }}-${{ hashFiles('native/vcpkg.json') }}
+          path: vcpkg-archives
+          key: vcpkg-qt-${{ runner.os }}-${{ hashFiles('native/vcpkg.json') }}-${{ github.run_id }}
           restore-keys: |
+            vcpkg-qt-${{ runner.os }}-${{ hashFiles('native/vcpkg.json') }}-
             vcpkg-qt-${{ runner.os }}-
 
       - name: Install UPX
@@ -148,20 +169,28 @@ jobs:
           $sha = "${{ steps.rev.outputs.sha }}"
           $exeSrc = "build\dist\OpenZenLoader.exe"
           $jarSrc = "build\libs\hey-1.0.jar"
+          # The class-name obfuscator emits a fresh, random old->new mapping on every
+          # build; rename-mapping.txt is the ONLY way to de-obfuscate a stack trace, so
+          # ship it with the artifacts/release.
+          $mapSrc = "build\rename-mapping.txt"
           if (-not (Test-Path $exeSrc)) { throw "missing $exeSrc" }
           if (-not (Test-Path $jarSrc)) { throw "missing $jarSrc" }
+          if (-not (Test-Path $mapSrc)) { throw "missing $mapSrc" }
 
           $release = "build\release"
           New-Item -ItemType Directory -Force -Path $release | Out-Null
           $exeDst = Join-Path $release "OpenZenLoader-$sha.exe"
           $jarDst = Join-Path $release "OpenZen-$sha.jar"
+          $mapDst = Join-Path $release "OpenZen-$sha-mapping.txt"
           Copy-Item -Force $exeSrc $exeDst
           Copy-Item -Force $jarSrc $jarDst
+          Copy-Item -Force $mapSrc $mapDst
 
           $exeSz = (Get-Item $exeDst).Length
           $jarSz = (Get-Item $jarDst).Length
           Write-Host ("OpenZenLoader-{0}.exe : {1:N0} bytes ({2:N2} MB)" -f $sha, $exeSz, ($exeSz/1MB))
           Write-Host ("OpenZen-{0}.jar       : {1:N0} bytes ({2:N2} MB)" -f $sha, $jarSz, ($jarSz/1MB))
+          Write-Host ("OpenZen-{0}-mapping.txt : {1:N0} bytes" -f $sha, (Get-Item $mapDst).Length)
 
       # NOTE: actions/upload-artifact always wraps its content in a zip; that
       # is a platform limitation we cannot disable. By giving each artifact a
@@ -182,6 +211,14 @@ jobs:
         with:
           name: OpenZen-${{ steps.rev.outputs.sha }}.jar
           path: build/release/OpenZen-${{ steps.rev.outputs.sha }}.jar
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload de-obfuscation mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenZen-${{ steps.rev.outputs.sha }}-mapping.txt
+          path: build/release/OpenZen-${{ steps.rev.outputs.sha }}-mapping.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -216,9 +253,30 @@ jobs:
           # Write notes via a file so quoting / [brackets] / newlines in the
           # commit message can't corrupt the gh command line.
           $notes = "release-notes.md"
-          git log -1 --pretty=%B HEAD | Out-File -FilePath $notes -Encoding utf8
+          # Prepend a PRE-BUILT warning to the release body: these artifacts all share
+          # one fixed obfuscation mapping, so an anti-cheat class-name blacklist can
+          # target them. Tell users to self-compile for unique, per-build random names.
+          # Build the banner as a string array (one line each) to avoid PowerShell
+          # here-string column-0 terminator issues inside a YAML block scalar.
+          $warn = @(
+            '> ⚠️ **这是预构建版本（PRE-BUILT）**'
+            '>'
+            '> 本 Release 里的 `OpenZenLoader.exe` / `OpenZen-*.jar` 是 GitHub Actions 编译的成品，**所有人下载到的是同一套混淆类名**。这套固定的名字随时可能被反作弊（如布吉岛）收录进**类名黑名单**而失效。'
+            '>'
+            '> 想要一套**独一无二、别人都不知道**的类名，请**自己编译**（每次构建都会生成全新随机类名）：'
+            '> - **Fork 本仓库**，在你自己的 GitHub Actions 里跑 `Build Loader` 工作流，下载你自己的 artifact；**或**'
+            '> - **clone 到本地**自己 `gradlew jar` / `gradlew dll`。'
+            '>'
+            '> 详见仓库 README 的「编译时类名混淆」。`OpenZen-*-mapping.txt` 是本次构建的反混淆映射（每次构建都不同）。'
+            ''
+            '---'
+            ''
+          )
+          $warn | Out-File -FilePath $notes -Encoding utf8
+          git log -1 --pretty=%B HEAD | Out-File -FilePath $notes -Encoding utf8 -Append
           gh release create $tag `
               --title $title `
               --notes-file $notes `
               "build/release/OpenZenLoader-$env:SHA.exe" `
-              "build/release/OpenZen-$env:SHA.jar"
+              "build/release/OpenZen-$env:SHA.jar" `
+              "build/release/OpenZen-$env:SHA-mapping.txt"
